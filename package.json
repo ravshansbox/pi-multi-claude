@@ -1,0 +1,16 @@
+{
+  "name": "@ravshansbox/pi-multi-claude",
+  "version": "1.0.0",
+  "description": "Multi-account provider extension for pi with Anthropic Claude smart routing",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  }
+}
