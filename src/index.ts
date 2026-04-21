@@ -113,13 +113,13 @@ const PROVIDER_CONFIG = {
 			maxTokens: 64000,
 		},
 		{
-			id: "claude-opus-4-6",
-			name: "Claude Opus 4.6",
+			id: "claude-haiku-4-5",
+			name: "Claude Haiku 4.5",
 			reasoning: true,
 			input: ["text", "image"] as const,
-			cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-			contextWindow: 1000000,
-			maxTokens: 128000,
+			cost: { input: 1, output: 5 },
+			contextWindow: 200000,
+			maxTokens: 64000,
 		},
 		{
 			id: "claude-opus-4-7",
