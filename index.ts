@@ -92,7 +92,9 @@ function calculateRateLimitBackoffMs(reason: RateLimitReason): number {
 // =============================================================================
 
 const STORE_PATH = path.join(os.homedir(), ".pi", "agent", "multi-claude-auth.json");
+const STORE_LOCK_PATH = `${STORE_PATH}.lock`;
 const EXPIRY_SKEW_MS = 60_000;
+const LOCK_STALE_MS = 2 * 60_000;
 const USAGE_STALE_MS = 5 * 60 * 1000; // 5 minutes
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -206,6 +208,46 @@ function saveStore(store: AccountStore): void {
 	fs.writeFileSync(STORE_PATH, JSON.stringify(store, null, 2));
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
+	ensureDir(STORE_PATH);
+
+	for (let attempt = 0; attempt < 100; attempt++) {
+		try {
+			fs.mkdirSync(STORE_LOCK_PATH);
+			try {
+				return await fn();
+			} finally {
+				fs.rmSync(STORE_LOCK_PATH, { recursive: true, force: true });
+			}
+		} catch (error: any) {
+			if (error?.code !== "EEXIST") throw error;
+
+			try {
+				const stat = fs.statSync(STORE_LOCK_PATH);
+				if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+					fs.rmSync(STORE_LOCK_PATH, { recursive: true, force: true });
+					continue;
+				}
+			} catch {
+				// Lock disappeared between attempts; retry immediately.
+				continue;
+			}
+
+			await sleep(50 + Math.random() * 100);
+		}
+	}
+
+	throw new Error("Timed out waiting for multi-claude auth lock");
+}
+
+function tokenNeedsRefresh(account: StoredAccount, now = Date.now()): boolean {
+	return !account.expires || account.expires - EXPIRY_SKEW_MS <= now;
+}
+
 function markDepleted(index: number, entry: { until: number; reason: RateLimitReason; window: string }): void {
 	const store = loadStore();
 	if (index >= 0 && index < store.accounts.length) {
@@ -240,40 +282,44 @@ function getAccountOrder(sessionKey: string, accountCount: number): number[] {
 // Token Management
 // =============================================================================
 
-async function refreshToken(index: number, account: StoredAccount): Promise<StoredAccount | null> {
-	if (!account.refresh) return account.access ? account : null;
+async function refreshAccountIfNeeded(index: number): Promise<StoredAccount | null> {
+	const initialStore = loadStore();
+	const initialAccount = initialStore.accounts[index];
+	if (!initialAccount) return null;
+	if (!tokenNeedsRefresh(initialAccount)) return initialAccount;
+	if (!initialAccount.refresh) return initialAccount.access ? initialAccount : null;
 
 	try {
-		const refreshed = await refreshAnthropicToken(account.refresh);
+		return await withStoreLock(async () => {
+			const store = loadStore();
+			const account = store.accounts[index];
+			if (!account) return null;
 
-		const updated: StoredAccount = {
-			...account,
-			access: refreshed.access,
-			refresh: refreshed.refresh || account.refresh,
-			expires: refreshed.expires,
-			lastRefreshedAt: Date.now(),
-		};
+			// Another pi instance may have refreshed while we waited for the lock.
+			if (!tokenNeedsRefresh(account)) return account;
+			if (!account.refresh) return account.access ? account : null;
 
-		const store = loadStore();
-		store.accounts[index] = updated;
-		saveStore(store);
+			const refreshed = await refreshAnthropicToken(account.refresh);
+			const updated: StoredAccount = {
+				...account,
+				access: refreshed.access,
+				refresh: refreshed.refresh || account.refresh,
+				expires: refreshed.expires,
+				lastRefreshedAt: Date.now(),
+			};
 
-		return updated;
+			store.accounts[index] = updated;
+			saveStore(store);
+			return updated;
+		});
 	} catch {
-		return account.access ? account : null;
+		// Match pi's behavior: after a refresh failure, reload in case another
+		// process refreshed successfully. Otherwise preserve credentials for retry.
+		const store = loadStore();
+		const account = store.accounts[index];
+		if (account && !tokenNeedsRefresh(account)) return account;
+		return null;
 	}
-}
-
-async function refreshAccountIfNeeded(index: number): Promise<StoredAccount | null> {
-	const store = loadStore();
-	const account = store.accounts[index];
-	if (!account) return null;
-
-	const now = Date.now();
-	const needsRefresh = !account.expires || account.expires - EXPIRY_SKEW_MS <= now;
-
-	if (!needsRefresh) return account;
-	return refreshToken(index, account);
 }
 
 // =============================================================================
@@ -383,12 +429,14 @@ async function selectAccount(
 	for (let i = 0; i < accounts.length; i++) {
 		const acc = accounts[i];
 		if (!acc?.access) continue;
-
-		if (acc.expires && acc.expires - EXPIRY_SKEW_MS <= now) continue;
 		if (acc.depleted && acc.depleted.until > now) continue;
 
-		const weekPercent = acc.usage?.windows["week"]?.usedPercent ?? 0;
-		candidates.push({ account: acc, index: i, weekPercent });
+		const refreshed = await refreshAccountIfNeeded(i);
+		if (!refreshed?.access) continue;
+		if (tokenNeedsRefresh(refreshed)) continue;
+
+		const weekPercent = refreshed.usage?.windows["week"]?.usedPercent ?? 0;
+		candidates.push({ account: refreshed, index: i, weekPercent });
 	}
 
 	if (candidates.length === 0) return null;
@@ -794,12 +842,11 @@ function streamMultiProvider(
 		for (const index of order) {
 			const acc = accounts[index];
 			if (!acc?.access) continue;
-
-			if (acc.expires && acc.expires - EXPIRY_SKEW_MS <= now) continue;
 			if (acc.depleted && acc.depleted.until > now) continue;
 
 			const account = await refreshAccountIfNeeded(index);
-			if (!account) continue;
+			if (!account?.access) continue;
+			if (tokenNeedsRefresh(account)) continue;
 
 			const apiKey = account.access;
 			const inner = streamSimple(
@@ -923,7 +970,16 @@ export default function (pi: ExtensionAPI) {
 		baseUrl: PROVIDER_CONFIG.baseUrl,
 		apiKey: "__multi_account_internal__",
 		api: PROVIDER_CONFIG.api,
-		models: PROVIDER_CONFIG.models,
+		models: PROVIDER_CONFIG.models.map((model) => ({
+			...model,
+			input: [...model.input],
+			cost: {
+				input: model.cost.input,
+				output: model.cost.output,
+				cacheRead: "cacheRead" in model.cost ? model.cost.cacheRead : 0,
+				cacheWrite: "cacheWrite" in model.cost ? model.cost.cacheWrite : 0,
+			},
+		})),
 		streamSimple: streamMultiProvider as any,
 	});
 

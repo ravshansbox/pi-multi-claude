@@ -1,7 +1,6 @@
 {
-  "extends": "@oh-my-pi/tsconfig/base.json",
   "compilerOptions": {
-    "outDir": "dist"
-  },
-  "include": ["src"]
+    "skipLibCheck": true,
+    "strict": true
+  }
 }
