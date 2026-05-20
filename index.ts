@@ -19,15 +19,15 @@ import {
 	type Model,
 	type SimpleStreamOptions,
 	streamSimple,
-} from "@mariozechner/pi-ai";
-import { loginAnthropic, refreshAnthropicToken } from "@mariozechner/pi-ai/oauth";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-ai";
+import { loginAnthropic, refreshAnthropicToken } from "@earendil-works/pi-ai/oauth";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { exec } from "node:child_process";
-import { matchesKey } from "@mariozechner/pi-tui";
+import { matchesKey } from "@earendil-works/pi-tui";
 
 // =============================================================================
 // Rate Limit Classification
