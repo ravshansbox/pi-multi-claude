@@ -773,7 +773,7 @@ function streamMultiProvider(
 		let lastError: any = null;
 
 		// Build candidates: skip missing access or currently depleted accounts
-		type Candidate = { account: StoredAccount; index: number; weekPercent: number };
+		type Candidate = { account: StoredAccount; index: number; weekResetAt: number };
 		const candidates: Candidate[] = [];
 
 		for (let i = 0; i < accounts.length; i++) {
@@ -793,23 +793,24 @@ function streamMultiProvider(
 				accountWithUsage = loadStore().accounts[i] ?? refreshed;
 			}
 
-			const weekPercent = accountWithUsage.usage?.windows["week"]?.usedPercent ?? 0;
-			candidates.push({ account: accountWithUsage, index: i, weekPercent });
+			const weekResetAt = accountWithUsage.usage?.windows["week"]?.resetAt ?? Infinity;
+			candidates.push({ account: accountWithUsage, index: i, weekResetAt });
 		}
 
 		if (candidates.length > 0) {
-			// Sort by least-used week quota first.
+			// Sort by soonest weekly reset first — prefer accounts whose quota
+			// replenishes earliest so fresher accounts are preserved for later.
 			// Break ties with a session-stable hash so the same session
 			// consistently lands on the same account.
-			const tiedByPercent = new Map<number, number[]>();
+			const tiedByReset = new Map<number, number[]>();
 			for (const c of candidates) {
-				const arr = tiedByPercent.get(c.weekPercent) ?? [];
+				const arr = tiedByReset.get(c.weekResetAt) ?? [];
 				arr.push(c.index);
-				tiedByPercent.set(c.weekPercent, arr);
+				tiedByReset.set(c.weekResetAt, arr);
 			}
 			candidates.sort((a, b) => {
-				if (a.weekPercent !== b.weekPercent) return a.weekPercent - b.weekPercent;
-				const tied = tiedByPercent.get(a.weekPercent)!;
+				if (a.weekResetAt !== b.weekResetAt) return a.weekResetAt - b.weekResetAt;
+				const tied = tiedByReset.get(a.weekResetAt)!;
 				const pick = tied[hashIndex(currentSessionKey, tied.length)];
 				return a.index === pick ? -1 : b.index === pick ? 1 : a.index - b.index;
 			});
