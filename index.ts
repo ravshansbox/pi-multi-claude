@@ -61,6 +61,8 @@ function parseRateLimitReason(errorMessage: string): RateLimitReason {
 		return "RATE_LIMIT_EXCEEDED";
 	}
 
+	// Note: "resource exhausted" is already caught above as MODEL_CAPACITY_EXHAUSTED,
+	// so this branch handles plain "exhausted" / "quota" / "usage limit" messages.
 	if (lower.includes("exhausted") || lower.includes("quota") || lower.includes("usage limit")) {
 		return "QUOTA_EXHAUSTED";
 	}
@@ -102,8 +104,6 @@ const PROVIDER_CONFIG = {
 	provider: "anthropic-multi",
 	api: "anthropic-multi-api" as Api,
 	baseUrl: "https://api.anthropic.com",
-	profileUrl: "https://api.anthropic.com/api/oauth/profile",
-	usageUrl: "https://api.anthropic.com/api/oauth/usage",
 	models: [
 		{
 			id: "claude-sonnet-4-6",
@@ -134,8 +134,6 @@ const PROVIDER_CONFIG = {
 		},
 	],
 } as const;
-
-const STORE_KEY = PROVIDER_CONFIG.provider;
 
 // =============================================================================
 // Types
@@ -187,7 +185,7 @@ function loadStore(): AccountStore {
 	try {
 		if (fs.existsSync(STORE_PATH)) {
 			const raw = JSON.parse(fs.readFileSync(STORE_PATH, "utf-8")) as any;
-			const store: AccountStore = raw.accounts ? raw : { accounts: raw[STORE_KEY]?.accounts ?? [] };
+			const store: AccountStore = raw.accounts ? raw : { accounts: [] };
 			// Clean up expired depleted entries
 			const now = Date.now();
 			for (const acc of store.accounts) {
@@ -270,12 +268,6 @@ function hashIndex(sessionKey: string, accountCount: number): number {
 	if (accountCount <= 0) return 0;
 	const digest = createHash("sha256").update(sessionKey).digest();
 	return digest.readUInt32BE(0) % accountCount;
-}
-
-function getAccountOrder(sessionKey: string, accountCount: number): number[] {
-	if (accountCount <= 0) return [];
-	const start = hashIndex(sessionKey, accountCount);
-	return Array.from({ length: accountCount }, (_, i) => (start + i) % accountCount);
 }
 
 // =============================================================================
@@ -414,60 +406,6 @@ async function refreshUsage(index: number, account: StoredAccount): Promise<void
 }
 
 // =============================================================================
-// Smart Account Selection
-// =============================================================================
-
-async function selectAccount(
-	sessionKey: string,
-): Promise<{ account: StoredAccount; index: number } | null> {
-	const store = loadStore();
-	const accounts = store.accounts;
-	const now = Date.now();
-
-	const candidates: { account: StoredAccount; index: number; weekPercent: number }[] = [];
-
-	for (let i = 0; i < accounts.length; i++) {
-		const acc = accounts[i];
-		if (!acc?.access) continue;
-		if (acc.depleted && acc.depleted.until > now) continue;
-
-		const refreshed = await refreshAccountIfNeeded(i);
-		if (!refreshed?.access) continue;
-		if (tokenNeedsRefresh(refreshed)) continue;
-
-		const weekPercent = refreshed.usage?.windows["week"]?.usedPercent ?? 0;
-		candidates.push({ account: refreshed, index: i, weekPercent });
-	}
-
-	if (candidates.length === 0) return null;
-
-	candidates.sort((a, b) => a.weekPercent - b.weekPercent);
-
-	const topPercent = candidates[0].weekPercent;
-	const top = candidates.filter((c) => c.weekPercent === topPercent);
-
-	let selected: { account: StoredAccount; index: number };
-	if (top.length > 1) {
-		const hashIdx = hashIndex(sessionKey, top.length);
-		selected = top[hashIdx];
-	} else {
-		selected = candidates[0];
-	}
-
-	let account = await refreshAccountIfNeeded(selected.index);
-	if (!account) return null;
-
-	const usageAge = Date.now() - (account.usage?.fetchedAt ?? 0);
-	if (usageAge >= USAGE_STALE_MS) {
-		await refreshUsage(selected.index, account);
-		const updatedStore = loadStore();
-		account = updatedStore.accounts[selected.index] ?? account;
-	}
-
-	return { account, index: selected.index };
-}
-
-// =============================================================================
 // OAuth Helpers
 // =============================================================================
 
@@ -503,7 +441,7 @@ async function addAccount(ctx: UIContext): Promise<StoredAccount> {
 
 	let email: string | undefined;
 	try {
-		const res = await fetch("https://api.anthropic.com/api/oauth/profile", {
+		const res = await fetchWithTimeout("https://api.anthropic.com/api/oauth/profile", {
 			headers: { Authorization: `Bearer ${credentials.access}` },
 		});
 		if (res.ok) {
@@ -531,7 +469,6 @@ async function handleCommand(args: string, ctx: UIContext): Promise<void> {
 	const parts = (args || "").trim().split(/\s+/).filter(Boolean);
 	const subcommand = parts[0]?.toLowerCase();
 	const subArgs = parts.slice(1);
-	const sessionKey = getSessionKey(ctx);
 
 	switch (subcommand) {
 		case "add": {
@@ -621,7 +558,7 @@ async function handleCommand(args: string, ctx: UIContext): Promise<void> {
 
 		case "usage": {
 			await ctx.ui.custom((tui: any, theme: any, _kb: any, done: () => void) => {
-				return new UsageComponent(tui, theme, () => done(), ctx);
+				return new UsageComponent(tui, theme, () => done());
 			});
 			return;
 		}
@@ -687,13 +624,11 @@ class UsageComponent {
 	private tui: { requestRender: () => void };
 	private theme: any;
 	private onClose: () => void;
-	private ctx: UIContext;
 
-	constructor(tui: { requestRender: () => void }, theme: any, onClose: () => void, ctx: UIContext) {
+	constructor(tui: { requestRender: () => void }, theme: any, onClose: () => void) {
 		this.tui = tui;
 		this.theme = theme;
 		this.onClose = onClose;
-		this.ctx = ctx;
 		this.load();
 	}
 
@@ -738,9 +673,8 @@ class UsageComponent {
 		const bold = (s: string) => t.bold(s);
 		const accent = (s: string) => t.fg("accent", s);
 
-		const totalW = width;
-		const innerW = totalW - 4;
-		const hLine = "─".repeat(totalW - 2);
+		const innerW = width - 4;
+		const hLine = "─".repeat(width - 2);
 
 		const box = (content: string) => {
 			const contentW = this.visibleWidth(content);
@@ -835,19 +769,53 @@ function streamMultiProvider(
 	(async () => {
 		const store = loadStore();
 		const accounts = store.accounts;
-		const order = getAccountOrder(currentSessionKey, accounts.length);
 		const now = Date.now();
 		let lastError: any = null;
 
-		for (const index of order) {
-			const acc = accounts[index];
+		// Build candidates: skip missing access or currently depleted accounts
+		type Candidate = { account: StoredAccount; index: number; weekPercent: number };
+		const candidates: Candidate[] = [];
+
+		for (let i = 0; i < accounts.length; i++) {
+			const acc = accounts[i];
 			if (!acc?.access) continue;
 			if (acc.depleted && acc.depleted.until > now) continue;
 
-			const account = await refreshAccountIfNeeded(index);
-			if (!account?.access) continue;
-			if (tokenNeedsRefresh(account)) continue;
+			const refreshed = await refreshAccountIfNeeded(i);
+			if (!refreshed?.access) continue;
+			if (tokenNeedsRefresh(refreshed)) continue;
 
+			// Refresh stale usage so the sort reflects current quota
+			const usageAge = Date.now() - (refreshed.usage?.fetchedAt ?? 0);
+			let accountWithUsage = refreshed;
+			if (usageAge >= USAGE_STALE_MS) {
+				await refreshUsage(i, refreshed);
+				accountWithUsage = loadStore().accounts[i] ?? refreshed;
+			}
+
+			const weekPercent = accountWithUsage.usage?.windows["week"]?.usedPercent ?? 0;
+			candidates.push({ account: accountWithUsage, index: i, weekPercent });
+		}
+
+		if (candidates.length > 0) {
+			// Sort by least-used week quota first.
+			// Break ties with a session-stable hash so the same session
+			// consistently lands on the same account.
+			const tiedByPercent = new Map<number, number[]>();
+			for (const c of candidates) {
+				const arr = tiedByPercent.get(c.weekPercent) ?? [];
+				arr.push(c.index);
+				tiedByPercent.set(c.weekPercent, arr);
+			}
+			candidates.sort((a, b) => {
+				if (a.weekPercent !== b.weekPercent) return a.weekPercent - b.weekPercent;
+				const tied = tiedByPercent.get(a.weekPercent)!;
+				const pick = tied[hashIndex(currentSessionKey, tied.length)];
+				return a.index === pick ? -1 : b.index === pick ? 1 : a.index - b.index;
+			});
+		}
+
+		for (const { account, index } of candidates) {
 			const apiKey = account.access;
 			const inner = streamSimple(
 				{
@@ -877,17 +845,11 @@ function streamMultiProvider(
 								reason === "QUOTA_EXHAUSTED"
 									? "week"
 									: "5h";
-
 							let until = account.usage?.windows[windowKey]?.resetAt;
 							if (!until || until <= Date.now()) {
 								until = Date.now() + calculateRateLimitBackoffMs(reason);
 							}
-
-							markDepleted(index, {
-								window: windowKey,
-								until,
-								reason,
-							});
+							markDepleted(index, { window: windowKey, until, reason });
 						}
 						lastError = event;
 						break;
