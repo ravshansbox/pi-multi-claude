@@ -33,7 +33,15 @@ async function usage(ak: string) {
 async function profile(ak: string) {
 	try {
 		const r = await fetch(`${API}/api/oauth/profile`, { headers: { Authorization: `Bearer ${ak}` }, signal: AbortSignal.timeout(TO) });
-		return r.ok ? ((await r.json()) as any)?.account?.email as string | undefined : undefined;
+		if (!r.ok) return undefined;
+		const d = (await r.json()) as any;
+		const acct = d.account;
+		const org = d.organization;
+		let plan: string | undefined;
+		if (acct?.has_claude_max) plan = "Max";
+		else if (acct?.has_claude_pro) plan = "Pro";
+		else if (org?.rate_limit_tier === "default_raven") plan = "Team";
+		return { email: acct?.email as string | undefined, plan };
 	} catch { return undefined; }
 }
 
@@ -62,7 +70,7 @@ function getActive(as: any): string | undefined {
 // ---------------------------------------------------------------------------
 
 interface Row {
-	key: string; i: number; email: string; win: Array<{ n: string; pct: number; reset?: number; clr: string }>; err?: string; active: boolean;
+	key: string; i: number; email: string; plan?: string; win: Array<{ n: string; pct: number; reset?: number; clr: string }>; err?: string; active: boolean;
 }
 
 class List {
@@ -100,7 +108,7 @@ class List {
 				const rem = 100 - wd.pct;
 				wins.push({ n: wn, pct: wd.pct, reset: wd.reset, clr: rem <= 10 ? "error" : rem <= 30 ? "warning" : "success" });
 			}
-			rs.push({ key: k, i, email: v.email ?? "unknown", win: wins, err: u ? undefined : "fetch failed", active: k === activeKey });
+			rs.push({ key: k, i, email: v.email ?? "unknown", plan: v.plan, win: wins, err: u ? undefined : "fetch failed", active: k === activeKey });
 		}
 
 		this.rs = rs;
@@ -155,12 +163,12 @@ class List {
 				if (k.startsWith(PF)) { const n = parseInt(k.slice(PF.length), 10); if (!isNaN(n) && n >= idx) idx = n + 1; }
 			}
 
-			const em = await profile(creds.access);
+			const p = await profile(creds.access);
 
-			as.set(pn(idx), { type: "oauth", ...creds, email: em });
+			as.set(pn(idx), { type: "oauth", ...creds, email: p?.email, plan: p?.plan });
 			as.set(ACT, { type: "oauth", ...creds });
 
-			this.ctx.ui.notify(`Added & switched to [${idx}]${em ? ` (${em})` : ""}`, "success");
+			this.ctx.ui.notify(`Added & switched to [${idx}]${p?.email ? ` (${p.email})` : ""}`, "success");
 		} catch (e: any) { this.ctx.ui.notify(`Failed: ${e?.message || e}`, "error"); }
 		this.busy = ""; this.loading = true; void this.init().then(() => { this.tu.requestRender(); });
 	}
@@ -193,7 +201,8 @@ class List {
 		else if (!this.rs.length) { l.push(bx("no accounts"), bx(""), bx(this.d("a  add account"))); }
 		else for (let i = 0; i < this.rs.length; i++) {
 			const r = this.rs[i];
-			l.push(bx(`${i === this.sel ? t.fg("accent", "▸ ") : "  "}${this.b(`[${r.i}]`)} ${r.email}${r.active ? t.fg("success", " ●") : ""}`));
+			const planLabel = r.plan ? t.fg("accent", ` ${r.plan}`) : "";
+			l.push(bx(`${i === this.sel ? t.fg("accent", "▸ ") : "  "}${this.b(`[${r.i}]`)} ${r.email}${planLabel}${r.active ? t.fg("success", " ●") : ""}`));
 			if (r.err) { l.push(bx(this.d(`   ${r.err}`))); continue; }
 			for (const w of r.win) {
 				const f = Math.min(10, Math.round(w.pct / 10)), e = 10 - f;
