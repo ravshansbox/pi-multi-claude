@@ -136,6 +136,7 @@ class List {
 		const cred = as.get(r.key);
 		if (cred) as.set(ACT, cred);
 		this.done();
+		await this.ctx.reload();
 	}
 
 	private async doAdd() {
