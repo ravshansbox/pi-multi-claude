@@ -40,7 +40,7 @@ async function profile(ak: string) {
 		let plan: string | undefined;
 		if (acct?.has_claude_max) plan = "Max";
 		else if (acct?.has_claude_pro) plan = "Pro";
-		else if (org?.rate_limit_tier === "default_raven") plan = "Team";
+		else if (org?.rate_limit_tier === "default_raven") plan = org?.seat_tier === "team_premium" ? "Team Premium" : "Team Standard";
 		return { email: acct?.email as string | undefined, plan };
 	} catch { return undefined; }
 }
