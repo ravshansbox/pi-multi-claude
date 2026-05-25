@@ -2,8 +2,7 @@
  * Multi-Claude Extension
  *
  * Stores multiple Anthropic OAuth tokens in auth.json as "anthropic-N".
- * No state file — everything lives in auth.json.
- * Usage is fetched live on list. Email is cached at add time.
+ * No state file, no cached metadata — everything fetched live.
  * Active account = whichever token is under the "anthropic" key.
  */
 
@@ -16,37 +15,31 @@ const ACT = "anthropic";
 const TO = 10000;
 const API = "https://api.anthropic.com";
 
-async function usage(ak: string) {
+async function fetchUsage(ak: string) {
 	try {
-		const [ur, pr] = await Promise.all([
-			fetch(`${API}/api/oauth/usage`, { headers: { Authorization: `Bearer ${ak}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(TO) }),
-			fetch(`${API}/api/oauth/profile`, { headers: { Authorization: `Bearer ${ak}` }, signal: AbortSignal.timeout(TO) }),
-		]);
-		if (!ur.ok) return null;
-		const d = (await ur.json()) as any;
+		const r = await fetch(`${API}/api/oauth/usage`, { headers: { Authorization: `Bearer ${ak}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(TO) });
+		if (!r.ok) return null;
+		const d = (await r.json()) as any;
 		const w: Record<string, { pct: number; reset?: number }> = {};
 		if (d.five_hour?.utilization !== undefined) w["5h"] = { pct: d.five_hour.utilization, reset: d.five_hour.resets_at ? Date.parse(d.five_hour.resets_at) : undefined };
 		if (d.seven_day?.utilization !== undefined) w["week"] = { pct: d.seven_day.utilization, reset: d.seven_day.resets_at ? Date.parse(d.seven_day.resets_at) : undefined };
 		const mw = d.seven_day_sonnet || d.seven_day_opus;
 		if (mw?.utilization !== undefined) w[d.seven_day_sonnet ? "sonnet" : "opus"] = { pct: mw.utilization };
-
-		let plan: string | undefined;
-		if (pr.ok) {
-			const pd = (await pr.json()) as any;
-			const acct = pd.account, org = pd.organization;
-			if (acct?.has_claude_max) plan = "Max";
-			else if (acct?.has_claude_pro) plan = "Pro";
-			else if (org?.rate_limit_tier === "default_raven") plan = org?.seat_tier === "team_premium" ? "Team Premium" : "Team Standard";
-		}
-
-		return { w, plan };
+		return { w };
 	} catch { return null; }
 }
 
-async function emailOnly(ak: string) {
+async function fetchProfile(ak: string) {
 	try {
 		const r = await fetch(`${API}/api/oauth/profile`, { headers: { Authorization: `Bearer ${ak}` }, signal: AbortSignal.timeout(TO) });
-		return r.ok ? ((await r.json()) as any)?.account?.email as string | undefined : undefined;
+		if (!r.ok) return undefined;
+		const d = (await r.json()) as any;
+		const acct = d.account, org = d.organization;
+		let plan: string | undefined;
+		if (acct?.has_claude_max) plan = "max";
+		else if (acct?.has_claude_pro) plan = "pro";
+		else if (org?.rate_limit_tier === "default_raven") plan = org?.seat_tier === "team_premium" ? "team premium" : "team standard";
+		return { email: acct?.email as string | undefined, plan };
 	} catch { return undefined; }
 }
 
@@ -107,14 +100,13 @@ class List {
 			const v = as.get(k);
 			if (!v) continue;
 
-			const u = await usage(v.access);
-			const plan = u?.plan;
+			const [u, p] = await Promise.all([fetchUsage(v.access), fetchProfile(v.access)]);
 			const wins: Row["win"] = [];
 			if (u?.w) for (const [wn, wd] of Object.entries(u.w).sort((a, b) => ({ week: 0, "5h": 1, sonnet: 2, opus: 3 } as any)[a[0]] - ({ week: 0, "5h": 1, sonnet: 2, opus: 3 } as any)[b[0]])) {
 				const rem = 100 - wd.pct;
 				wins.push({ n: wn, pct: wd.pct, reset: wd.reset, clr: rem <= 10 ? "error" : rem <= 30 ? "warning" : "success" });
 			}
-			rs.push({ key: k, i, email: v.email ?? "unknown", plan, win: wins, err: u ? undefined : "fetch failed", active: k === activeKey });
+			rs.push({ key: k, i, email: p?.email ?? "unknown", plan: p?.plan, win: wins, err: u ? undefined : "fetch failed", active: k === activeKey });
 		}
 
 		this.rs = rs;
@@ -169,12 +161,10 @@ class List {
 				if (k.startsWith(PF)) { const n = parseInt(k.slice(PF.length), 10); if (!isNaN(n) && n >= idx) idx = n + 1; }
 			}
 
-			const em = await emailOnly(creds.access);
-
-			as.set(pn(idx), { type: "oauth", ...creds, email: em });
+			as.set(pn(idx), { type: "oauth", ...creds });
 			as.set(ACT, { type: "oauth", ...creds });
 
-			this.ctx.ui.notify(`Added & switched to [${idx}]${em ? ` (${em})` : ""}`, "success");
+			this.ctx.ui.notify(`Added & switched to [${idx}]`, "success");
 		} catch (e: any) { this.ctx.ui.notify(`Failed: ${e?.message || e}`, "error"); }
 		this.busy = ""; this.loading = true; void this.init().then(() => { this.tu.requestRender(); });
 	}
