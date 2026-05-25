@@ -18,30 +18,35 @@ const API = "https://api.anthropic.com";
 
 async function usage(ak: string) {
 	try {
-		const r = await fetch(`${API}/api/oauth/usage`, { headers: { Authorization: `Bearer ${ak}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(TO) });
-		if (!r.ok) return null;
-		const d = (await r.json()) as any;
+		const [ur, pr] = await Promise.all([
+			fetch(`${API}/api/oauth/usage`, { headers: { Authorization: `Bearer ${ak}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(TO) }),
+			fetch(`${API}/api/oauth/profile`, { headers: { Authorization: `Bearer ${ak}` }, signal: AbortSignal.timeout(TO) }),
+		]);
+		if (!ur.ok) return null;
+		const d = (await ur.json()) as any;
 		const w: Record<string, { pct: number; reset?: number }> = {};
 		if (d.five_hour?.utilization !== undefined) w["5h"] = { pct: d.five_hour.utilization, reset: d.five_hour.resets_at ? Date.parse(d.five_hour.resets_at) : undefined };
 		if (d.seven_day?.utilization !== undefined) w["week"] = { pct: d.seven_day.utilization, reset: d.seven_day.resets_at ? Date.parse(d.seven_day.resets_at) : undefined };
 		const mw = d.seven_day_sonnet || d.seven_day_opus;
 		if (mw?.utilization !== undefined) w[d.seven_day_sonnet ? "sonnet" : "opus"] = { pct: mw.utilization };
-		return { w };
+
+		let plan: string | undefined;
+		if (pr.ok) {
+			const pd = (await pr.json()) as any;
+			const acct = pd.account, org = pd.organization;
+			if (acct?.has_claude_max) plan = "Max";
+			else if (acct?.has_claude_pro) plan = "Pro";
+			else if (org?.rate_limit_tier === "default_raven") plan = org?.seat_tier === "team_premium" ? "Team Premium" : "Team Standard";
+		}
+
+		return { w, plan };
 	} catch { return null; }
 }
 
-async function profile(ak: string) {
+async function emailOnly(ak: string) {
 	try {
 		const r = await fetch(`${API}/api/oauth/profile`, { headers: { Authorization: `Bearer ${ak}` }, signal: AbortSignal.timeout(TO) });
-		if (!r.ok) return undefined;
-		const d = (await r.json()) as any;
-		const acct = d.account;
-		const org = d.organization;
-		let plan: string | undefined;
-		if (acct?.has_claude_max) plan = "Max";
-		else if (acct?.has_claude_pro) plan = "Pro";
-		else if (org?.rate_limit_tier === "default_raven") plan = org?.seat_tier === "team_premium" ? "Team Premium" : "Team Standard";
-		return { email: acct?.email as string | undefined, plan };
+		return r.ok ? ((await r.json()) as any)?.account?.email as string | undefined : undefined;
 	} catch { return undefined; }
 }
 
@@ -103,12 +108,13 @@ class List {
 			if (!v) continue;
 
 			const u = await usage(v.access);
+			const plan = u?.plan;
 			const wins: Row["win"] = [];
 			if (u?.w) for (const [wn, wd] of Object.entries(u.w).sort((a, b) => ({ week: 0, "5h": 1, sonnet: 2, opus: 3 } as any)[a[0]] - ({ week: 0, "5h": 1, sonnet: 2, opus: 3 } as any)[b[0]])) {
 				const rem = 100 - wd.pct;
 				wins.push({ n: wn, pct: wd.pct, reset: wd.reset, clr: rem <= 10 ? "error" : rem <= 30 ? "warning" : "success" });
 			}
-			rs.push({ key: k, i, email: v.email ?? "unknown", plan: v.plan, win: wins, err: u ? undefined : "fetch failed", active: k === activeKey });
+			rs.push({ key: k, i, email: v.email ?? "unknown", plan, win: wins, err: u ? undefined : "fetch failed", active: k === activeKey });
 		}
 
 		this.rs = rs;
@@ -163,12 +169,12 @@ class List {
 				if (k.startsWith(PF)) { const n = parseInt(k.slice(PF.length), 10); if (!isNaN(n) && n >= idx) idx = n + 1; }
 			}
 
-			const p = await profile(creds.access);
+			const em = await emailOnly(creds.access);
 
-			as.set(pn(idx), { type: "oauth", ...creds, email: p?.email, plan: p?.plan });
+			as.set(pn(idx), { type: "oauth", ...creds, email: em });
 			as.set(ACT, { type: "oauth", ...creds });
 
-			this.ctx.ui.notify(`Added & switched to [${idx}]${p?.email ? ` (${p.email})` : ""}`, "success");
+			this.ctx.ui.notify(`Added & switched to [${idx}]${em ? ` (${em})` : ""}`, "success");
 		} catch (e: any) { this.ctx.ui.notify(`Failed: ${e?.message || e}`, "error"); }
 		this.busy = ""; this.loading = true; void this.init().then(() => { this.tu.requestRender(); });
 	}
