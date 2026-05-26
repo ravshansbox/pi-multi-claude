@@ -1,11 +1,3 @@
-/**
- * Multi-Claude Extension
- *
- * Stores multiple Anthropic OAuth tokens in auth.json as "anthropic-N".
- * No state file, no cached metadata — everything fetched live.
- * Active account = whichever token is under the "anthropic" key.
- */
-
 import { loginAnthropic } from "@earendil-works/pi-ai/oauth";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
@@ -45,10 +37,6 @@ async function fetchProfile(ak: string) {
 
 function pn(n: number) { return `${PF}${n}`; }
 
-// ---------------------------------------------------------------------------
-// Auth helpers — everything in auth.json
-// ---------------------------------------------------------------------------
-
 function getAccounts(as: any): string[] {
 	return (as.list?.() ?? []).filter((k: string) => k.startsWith(PF)).sort();
 }
@@ -62,10 +50,6 @@ function getActive(as: any): string | undefined {
 	}
 	return undefined;
 }
-
-// ---------------------------------------------------------------------------
-// TUI list
-// ---------------------------------------------------------------------------
 
 interface Row {
 	key: string; i: number; email: string; plan?: string; win: Array<{ n: string; pct: number; reset?: number; clr: string }>; err?: string; active: boolean;
@@ -100,7 +84,10 @@ class List {
 			const v = as.get(k);
 			if (!v) continue;
 
-			const [u, p] = await Promise.all([fetchUsage(v.access), fetchProfile(v.access)]);
+			const ak = (Date.now() >= (v as any).expires) ? await as.getApiKey(k).catch(() => undefined) : (v as any).access;
+			if (!ak) { rs.push({ key: k, i, email: "unknown", win: [], err: "auth expired", active: k === activeKey }); continue; }
+
+			const [u, p] = await Promise.all([fetchUsage(ak), fetchProfile(ak)]);
 			const wins: Row["win"] = [];
 			if (u?.w) for (const [wn, wd] of Object.entries(u.w).sort((a, b) => ({ week: 0, "5h": 1, sonnet: 2, opus: 3 } as any)[a[0]] - ({ week: 0, "5h": 1, sonnet: 2, opus: 3 } as any)[b[0]])) {
 				const rem = 100 - wd.pct;
@@ -221,11 +208,16 @@ function fmt(d: Date): string {
 	return `in ${Math.floor(h / 24)}d`;
 }
 
-// ---------------------------------------------------------------------------
-// Entry
-// ---------------------------------------------------------------------------
-
 export default function (pi: ExtensionAPI) {
+	pi.on("session_start", async (_event, ctx) => {
+		const as = ctx.modelRegistry.authStorage;
+		for (const k of as.list?.() ?? []) {
+			if (k.startsWith(PF) || k === ACT) {
+				try { await as.getApiKey(k); } catch {}
+			}
+		}
+	});
+
 	pi.registerCommand("multi-claude", {
 		description: "Manage multiple Anthropic Claude accounts",
 		handler: async (_args, ctx) => {
