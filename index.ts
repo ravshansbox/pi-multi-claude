@@ -1,4 +1,4 @@
-import { loginAnthropic } from "@earendil-works/pi-ai/oauth";
+import { loginAnthropic, refreshAnthropicToken } from "@earendil-works/pi-ai/oauth";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
 
@@ -55,6 +55,17 @@ interface Row {
 	key: string; i: number; email: string; plan?: string; win: Array<{ n: string; pct: number; reset?: number; clr: string }>; err?: string; active: boolean;
 }
 
+async function getAccessToken(as: any, key: string): Promise<string | undefined> {
+	const cred = as.get(key);
+	if (!cred || cred.type !== "oauth") return undefined;
+	if (Date.now() < cred.expires) return cred.access;
+	const fresh = await refreshAnthropicToken(cred).catch(() => undefined);
+	if (!fresh) return undefined;
+	as.set(key, { type: "oauth", ...fresh });
+	if (key === ACT) as.set(ACT, { type: "oauth", ...fresh });
+	return fresh.access;
+}
+
 class List {
 	private rs: Row[] = [];
 	private loading = true;
@@ -84,7 +95,7 @@ class List {
 			const v = as.get(k);
 			if (!v) continue;
 
-			const ak = (Date.now() >= (v as any).expires) ? await as.getApiKey(k).catch(() => undefined) : (v as any).access;
+			const ak = await getAccessToken(as, k);
 			if (!ak) { rs.push({ key: k, i, email: "unknown", win: [], err: "auth expired", active: k === activeKey }); continue; }
 
 			const [u, p] = await Promise.all([fetchUsage(ak), fetchProfile(ak)]);
@@ -213,7 +224,7 @@ export default function (pi: ExtensionAPI) {
 		const as = ctx.modelRegistry.authStorage;
 		for (const k of as.list?.() ?? []) {
 			if (k.startsWith(PF) || k === ACT) {
-				try { await as.getApiKey(k); } catch {}
+				try { await getAccessToken(as, k); } catch {}
 			}
 		}
 	});
