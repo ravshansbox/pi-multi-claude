@@ -59,7 +59,7 @@ async function getAccessToken(as: any, key: string): Promise<string | undefined>
 	const cred = as.get(key);
 	if (!cred || cred.type !== "oauth") return undefined;
 	if (Date.now() < cred.expires) return cred.access;
-	const fresh = await refreshAnthropicToken(cred).catch(() => undefined);
+	const fresh = await refreshAnthropicToken(cred.refresh).catch(() => undefined);
 	if (!fresh) return undefined;
 	as.set(key, { type: "oauth", ...fresh });
 	if (key === ACT) as.set(ACT, { type: "oauth", ...fresh });
