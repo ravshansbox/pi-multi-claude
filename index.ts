@@ -519,13 +519,21 @@ function formatCountdown(date: Date): string {
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, context) => {
 		const authStorage = context.modelRegistry.authStorage;
-		for (const key of authStorage.list()) {
-			if (key.startsWith(ACCOUNT_PREFIX) || key === ACTIVE_KEY) {
-				try {
-					await getAccessToken(authStorage, key);
-				} catch (error) {
-					debug("session_start refresh failed", key, error);
+		const activeAccountKey = getActiveAccountKey(authStorage);
+
+		// Do not refresh ACTIVE_KEY directly. Anthropic refresh tokens rotate, so
+		// refreshing both the numbered account and the active provider copy can make
+		// the second refresh fail. Refresh the numbered account, then copy its fresh
+		// credential into ACTIVE_KEY when it is the active account.
+		for (const key of getAccountKeys(authStorage)) {
+			try {
+				await getAccessToken(authStorage, key);
+				if (key === activeAccountKey) {
+					const credential = authStorage.get(key);
+					if (credential) authStorage.set(ACTIVE_KEY, credential);
 				}
+			} catch (error) {
+				debug("session_start refresh failed", key, error);
 			}
 		}
 	});
