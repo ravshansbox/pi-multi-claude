@@ -1,13 +1,17 @@
 import { loginAnthropic, refreshAnthropicToken } from "@earendil-works/pi-ai/oauth";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { AuthStorage } from "@earendil-works/pi-coding-agent";
-import type { Theme, TUI, KeybindingsManager, Component } from "@earendil-works/pi-tui";
-import { matchesKey } from "@earendil-works/pi-tui";
+import { type ExtensionAPI, type ExtensionCommandContext, type AuthStorage, type Theme, type OAuthCredential } from "@earendil-works/pi-coding-agent";
+import { matchesKey, type TUI, type KeybindingsManager, type Component } from "@earendil-works/pi-tui";
 
 const ACCOUNT_PREFIX = "anthropic-";
 const ACTIVE_KEY = "anthropic";
-const FETCH_TIMEOUT_MS = 10000;
+const FETCH_TIMEOUT_MS = 10_000;
 const ANTHROPIC_API_BASE = "https://api.anthropic.com";
+
+const DEBUG = !!process.env.MULTI_CLAUDE_DEBUG;
+
+function debug(...args: unknown[]): void {
+	if (DEBUG) console.error("[multi-claude]", ...args);
+}
 
 interface AnthropicUsageWindow {
 	utilization: number;
@@ -44,7 +48,10 @@ async function fetchUsage(accessToken: string) {
 			},
 			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
 		});
-		if (!response.ok) return null;
+		if (!response.ok) {
+			debug("fetchUsage non-ok", response.status);
+			return null;
+		}
 
 		const data: AnthropicUsageResponse = await response.json();
 		const windows: Record<string, { percent: number; reset?: number }> = {};
@@ -64,7 +71,8 @@ async function fetchUsage(accessToken: string) {
 		}
 
 		return { windows };
-	} catch {
+	} catch (err) {
+		debug("fetchUsage error", err);
 		return null;
 	}
 }
@@ -93,7 +101,8 @@ async function fetchProfile(accessToken: string) {
 		}
 
 		return { email: account?.email, plan };
-	} catch {
+	} catch (err) {
+		debug("fetchProfile error", err);
 		return undefined;
 	}
 }
@@ -117,9 +126,8 @@ function getActiveAccountKey(authStorage: AuthStorage): string | undefined {
 		const credential = authStorage.get(accountKey);
 		if (
 			credential &&
-			credential.type === activeCredential.type &&
 			credential.type === "oauth" &&
-			credential.access === activeCredential.access
+			(credential as OAuthCredential).access === (activeCredential as OAuthCredential).access
 		) {
 			return accountKey;
 		}
@@ -151,7 +159,10 @@ async function getAccessToken(authStorage: AuthStorage, key: string): Promise<st
 	if (!credential || credential.type !== "oauth") return undefined;
 	if (Date.now() < credential.expires) return credential.access;
 
-	const freshCredentials = await refreshAnthropicToken(credential.refresh).catch(() => undefined);
+	const freshCredentials = await refreshAnthropicToken(credential.refresh).catch((err: unknown) => {
+		debug("refreshAnthropicToken error", key, err);
+		return undefined;
+	});
 	if (!freshCredentials) return undefined;
 
 	authStorage.set(key, { type: "oauth", ...freshCredentials });
@@ -167,7 +178,7 @@ class AccountList implements Component {
 	private selectedIndex = 0;
 	private tui: TUI;
 	private theme: Theme;
-	private done: () => void;
+	private done: (_?: unknown) => void;
 	private context: ExtensionCommandContext;
 	private busy = "";
 
@@ -175,7 +186,7 @@ class AccountList implements Component {
 		tui: TUI,
 		theme: Theme,
 		_keybindings: KeybindingsManager,
-		done: () => void,
+		done: (_?: unknown) => void,
 		context: ExtensionCommandContext,
 	) {
 		this.tui = tui;
@@ -266,7 +277,7 @@ class AccountList implements Component {
 		if (this.busy) return;
 
 		if (matchesKey(event, "escape")) {
-			this.done();
+			this.done(undefined);
 			return;
 		}
 
@@ -318,7 +329,7 @@ class AccountList implements Component {
 			authStorage.set(ACTIVE_KEY, credential);
 		}
 
-		this.done();
+		this.done(undefined);
 
 		try {
 			await this.context.reload();
@@ -333,20 +344,25 @@ class AccountList implements Component {
 	private async addAccount() {
 		try {
 			const credentials = await loginAnthropic({
-				onAuth: ({ url }) => {
+				onAuth: ({ url, instructions }) => {
 					this.context.ui.notify(`Open: ${url}`, "info");
+					if (instructions) this.context.ui.notify(instructions, "info");
+
 					void import("node:child_process").then(({ exec }) => {
+						let openCmd: string;
 						if (process.platform === "darwin") {
-							exec(`open '${url}'`);
+							openCmd = `open '${url}'`;
 						} else if (process.platform === "win32") {
-							exec(`start "" "${url}"`);
+							openCmd = `start "" "${url}"`;
 						} else {
-							exec(`xdg-open '${url}'`);
+							openCmd = `xdg-open '${url}'`;
 						}
+						exec(openCmd);
 					});
 				},
-				onPrompt: async () => {
-					const code = await this.context.ui.input("Paste the Anthropic authorization code:");
+				onProgress: (msg: string) => this.context.ui.notify(msg, "info"),
+				onPrompt: async ({ message }: { message: string }) => {
+					const code = await this.context.ui.input(message);
 					if (!code?.trim()) throw new Error("Cancelled");
 					return code.trim();
 				},
@@ -354,7 +370,6 @@ class AccountList implements Component {
 
 			const authStorage = this.context.modelRegistry.authStorage;
 
-			// Find the next available account index
 			let nextIndex = 0;
 			for (const key of authStorage.list()) {
 				if (key.startsWith(ACCOUNT_PREFIX)) {
@@ -368,7 +383,7 @@ class AccountList implements Component {
 			authStorage.set(makeAccountKey(nextIndex), { type: "oauth", ...credentials });
 			authStorage.set(ACTIVE_KEY, { type: "oauth", ...credentials });
 
-			this.context.ui.notify(`Added & switched to [${nextIndex}]`, "success");
+			this.context.ui.notify(`Added & switched to [${nextIndex}]`, "info");
 		} catch (error) {
 			this.context.ui.notify(
 				`Failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -415,7 +430,6 @@ class AccountList implements Component {
 
 		const lines: string[] = [];
 
-		// Busy state
 		if (this.busy) {
 			lines.push(
 				this.dim(`╭${horizontalLine}╮`),
@@ -427,20 +441,17 @@ class AccountList implements Component {
 			return lines;
 		}
 
-		// Header
 		lines.push(
 			this.dim(`╭${horizontalLine}╮`),
 			boxLine(this.bold(this.accent("multi-claude"))),
 			this.dim(`├${horizontalLine}┤`),
 		);
 
-		// Loading / empty states
 		if (this.loading) {
 			lines.push(boxLine("loading..."));
 		} else if (!this.rows.length) {
 			lines.push(boxLine("no accounts"), boxLine(""), boxLine(this.dim("a  add account")));
 		} else {
-			// Account rows
 			for (let index = 0; index < this.rows.length; index++) {
 				const row = this.rows[index];
 				const isSelected = index === this.selectedIndex;
@@ -454,13 +465,11 @@ class AccountList implements Component {
 					),
 				);
 
-				// Error line
 				if (row.error) {
 					lines.push(boxLine(this.dim(`   ${row.error}`)));
 					continue;
 				}
 
-				// Usage bars
 				for (const window of row.usageWindows) {
 					const filled = Math.min(10, Math.round(window.percent / 10));
 					const empty = 10 - filled;
@@ -478,7 +487,6 @@ class AccountList implements Component {
 			}
 		}
 
-		// Footer
 		lines.push(
 			this.dim(`├${horizontalLine}┤`),
 			boxLine(this.dim("↑↓ select  a add  ↵ switch  ⌫ remove  esc close")),
@@ -493,7 +501,7 @@ function formatCountdown(date: Date): string {
 	const diffMs = date.getTime() - Date.now();
 	if (diffMs < 0) return "now";
 
-	const minutes = Math.floor(diffMs / 60000);
+	const minutes = Math.floor(diffMs / 60_000);
 	if (minutes < 60) return `in ${minutes}m`;
 
 	const hours = Math.floor(minutes / 60);
@@ -512,8 +520,8 @@ export default function (pi: ExtensionAPI) {
 			if (key.startsWith(ACCOUNT_PREFIX) || key === ACTIVE_KEY) {
 				try {
 					await getAccessToken(authStorage, key);
-				} catch {
-					// Token refresh failures are non-fatal during session start
+				} catch (err) {
+					debug("session_start refresh failed", key, err);
 				}
 			}
 		}
