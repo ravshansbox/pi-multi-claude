@@ -71,8 +71,8 @@ async function fetchUsage(accessToken: string) {
 		}
 
 		return { windows };
-	} catch (err) {
-		debug("fetchUsage error", err);
+	} catch (error) {
+		debug("fetchUsage error", error);
 		return null;
 	}
 }
@@ -101,8 +101,8 @@ async function fetchProfile(accessToken: string) {
 		}
 
 		return { email: account?.email, plan };
-	} catch (err) {
-		debug("fetchProfile error", err);
+	} catch (error) {
+		debug("fetchProfile error", error);
 		return undefined;
 	}
 }
@@ -159,8 +159,8 @@ async function getAccessToken(authStorage: AuthStorage, key: string): Promise<st
 	if (!credential || credential.type !== "oauth") return undefined;
 	if (Date.now() < credential.expires) return credential.access;
 
-	const freshCredentials = await refreshAnthropicToken(credential.refresh).catch((err: unknown) => {
-		debug("refreshAnthropicToken error", key, err);
+	const freshCredentials = await refreshAnthropicToken(credential.refresh).catch((error: unknown) => {
+		debug("refreshAnthropicToken error", key, error);
 		return undefined;
 	});
 	if (!freshCredentials) return undefined;
@@ -324,6 +324,9 @@ class AccountList implements Component {
 		if (!row || row.active) return;
 
 		const authStorage = this.context.modelRegistry.authStorage;
+		// Refresh the token (if expired) before activating, so we never copy a
+		// stale credential into ACTIVE_KEY.
+		await getAccessToken(authStorage, row.key);
 		const credential = authStorage.get(row.key);
 		if (credential) {
 			authStorage.set(ACTIVE_KEY, credential);
@@ -360,7 +363,7 @@ class AccountList implements Component {
 						exec(openCmd);
 					});
 				},
-				onProgress: (msg: string) => this.context.ui.notify(msg, "info"),
+				onProgress: (message: string) => this.context.ui.notify(message, "info"),
 				onPrompt: async ({ message }: { message: string }) => {
 					const code = await this.context.ui.input(message);
 					if (!code?.trim()) throw new Error("Cancelled");
@@ -470,17 +473,17 @@ class AccountList implements Component {
 					continue;
 				}
 
-				for (const window of row.usageWindows) {
-					const filled = Math.min(10, Math.round(window.percent / 10));
+				for (const usageWindow of row.usageWindows) {
+					const filled = Math.min(10, Math.round(usageWindow.percent / 10));
 					const empty = 10 - filled;
-					const bar = theme.fg(window.color, "█".repeat(filled)) + this.dim("░".repeat(empty));
-					const resetLabel = window.reset
-						? this.dim(` ${formatCountdown(new Date(window.reset))}`)
+					const bar = theme.fg(usageWindow.color, "█".repeat(filled)) + this.dim("░".repeat(empty));
+					const resetLabel = usageWindow.reset
+						? this.dim(` ${formatCountdown(new Date(usageWindow.reset))}`)
 						: "";
 
 					lines.push(
 						boxLine(
-							`   ${window.name.padEnd(6)} ${bar} ${window.percent.toFixed(0).padStart(3)}%${resetLabel}`,
+							`   ${usageWindow.name.padEnd(6)} ${bar} ${usageWindow.percent.toFixed(0).padStart(3)}%${resetLabel}`,
 						),
 					);
 				}
@@ -520,8 +523,8 @@ export default function (pi: ExtensionAPI) {
 			if (key.startsWith(ACCOUNT_PREFIX) || key === ACTIVE_KEY) {
 				try {
 					await getAccessToken(authStorage, key);
-				} catch (err) {
-					debug("session_start refresh failed", key, err);
+				} catch (error) {
+					debug("session_start refresh failed", key, error);
 				}
 			}
 		}
