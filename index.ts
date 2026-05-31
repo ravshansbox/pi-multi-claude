@@ -159,6 +159,10 @@ async function getAccessToken(authStorage: AuthStorage, key: string): Promise<st
 	if (!credential || credential.type !== "oauth") return undefined;
 	if (Date.now() < credential.expires) return credential.access;
 
+	// Never refresh the provider's current/active key directly. Refresh only the
+	// numbered account copies, then copy one into ACTIVE_KEY if needed.
+	if (key === ACTIVE_KEY) return credential.access;
+
 	const freshCredentials = await refreshAnthropicToken(credential.refresh).catch((error: unknown) => {
 		debug("refreshAnthropicToken error", key, error);
 		return undefined;
@@ -166,9 +170,6 @@ async function getAccessToken(authStorage: AuthStorage, key: string): Promise<st
 	if (!freshCredentials) return undefined;
 
 	authStorage.set(key, { type: "oauth", ...freshCredentials });
-	if (key === ACTIVE_KEY) {
-		authStorage.set(ACTIVE_KEY, { type: "oauth", ...freshCredentials });
-	}
 	return freshCredentials.access;
 }
 
@@ -324,8 +325,6 @@ class AccountList implements Component {
 		if (!row || row.active) return;
 
 		const authStorage = this.context.modelRegistry.authStorage;
-		// Refresh the token (if expired) before activating, so we never copy a
-		// stale credential into ACTIVE_KEY.
 		await getAccessToken(authStorage, row.key);
 		const credential = authStorage.get(row.key);
 		if (credential) {
@@ -521,10 +520,6 @@ export default function (pi: ExtensionAPI) {
 		const authStorage = context.modelRegistry.authStorage;
 		const activeAccountKey = getActiveAccountKey(authStorage);
 
-		// Do not refresh ACTIVE_KEY directly. Anthropic refresh tokens rotate, so
-		// refreshing both the numbered account and the active provider copy can make
-		// the second refresh fail. Refresh the numbered account, then copy its fresh
-		// credential into ACTIVE_KEY when it is the active account.
 		for (const key of getAccountKeys(authStorage)) {
 			try {
 				await getAccessToken(authStorage, key);
