@@ -1,5 +1,7 @@
 import { loginAnthropic, refreshAnthropicToken } from "@earendil-works/pi-ai/oauth";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { Theme, TUI, KeybindingsManager, Component } from "@earendil-works/pi-tui";
 import { matchesKey } from "@earendil-works/pi-tui";
 
 const PF = "anthropic-";
@@ -7,11 +9,39 @@ const ACT = "anthropic";
 const TO = 10000;
 const API = "https://api.anthropic.com";
 
+interface AnthropicUsageWindow {
+	utilization: number;
+	resets_at?: string;
+}
+
+interface AnthropicUsageResponse {
+	five_hour?: AnthropicUsageWindow;
+	seven_day?: AnthropicUsageWindow;
+	seven_day_sonnet?: AnthropicUsageWindow;
+	seven_day_opus?: AnthropicUsageWindow;
+}
+
+interface AnthropicProfileAccount {
+	email?: string;
+	has_claude_max?: boolean;
+	has_claude_pro?: boolean;
+}
+
+interface AnthropicProfileOrg {
+	rate_limit_tier?: string;
+	seat_tier?: string;
+}
+
+interface AnthropicProfileResponse {
+	account?: AnthropicProfileAccount;
+	organization?: AnthropicProfileOrg;
+}
+
 async function fetchUsage(ak: string) {
 	try {
 		const r = await fetch(`${API}/api/oauth/usage`, { headers: { Authorization: `Bearer ${ak}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(TO) });
 		if (!r.ok) return null;
-		const d = (await r.json()) as any;
+		const d: AnthropicUsageResponse = await r.json();
 		const w: Record<string, { pct: number; reset?: number }> = {};
 		if (d.five_hour?.utilization !== undefined) w["5h"] = { pct: d.five_hour.utilization, reset: d.five_hour.resets_at ? Date.parse(d.five_hour.resets_at) : undefined };
 		if (d.seven_day?.utilization !== undefined) w["week"] = { pct: d.seven_day.utilization, reset: d.seven_day.resets_at ? Date.parse(d.seven_day.resets_at) : undefined };
@@ -21,41 +51,45 @@ async function fetchUsage(ak: string) {
 	} catch { return null; }
 }
 
+const USAGE_SORT: Record<string, number> = { week: 0, "5h": 1, sonnet: 2, opus: 3 };
+
 async function fetchProfile(ak: string) {
 	try {
 		const r = await fetch(`${API}/api/oauth/profile`, { headers: { Authorization: `Bearer ${ak}` }, signal: AbortSignal.timeout(TO) });
 		if (!r.ok) return undefined;
-		const d = (await r.json()) as any;
+		const d: AnthropicProfileResponse = await r.json();
 		const acct = d.account, org = d.organization;
 		let plan: string | undefined;
 		if (acct?.has_claude_max) plan = "max";
 		else if (acct?.has_claude_pro) plan = "pro";
 		else if (org?.rate_limit_tier === "default_raven") plan = org?.seat_tier === "team_premium" ? "team premium" : "team standard";
-		return { email: acct?.email as string | undefined, plan };
+		return { email: acct?.email, plan };
 	} catch { return undefined; }
 }
 
 function pn(n: number) { return `${PF}${n}`; }
 
-function getAccounts(as: any): string[] {
-	return (as.list?.() ?? []).filter((k: string) => k.startsWith(PF)).sort();
+function getAccounts(as: AuthStorage): string[] {
+	return as.list().filter((k) => k.startsWith(PF)).sort();
 }
 
-function getActive(as: any): string | undefined {
+function getActive(as: AuthStorage): string | undefined {
 	const cred = as.get(ACT);
 	if (!cred) return undefined;
 	for (const k of getAccounts(as)) {
 		const v = as.get(k);
-		if (v && v.type === cred.type && v.access === cred.access) return k;
+		if (v && v.type === cred.type && v.type === "oauth" && v.access === cred.access) return k;
 	}
 	return undefined;
 }
 
+type UsageColor = "error" | "warning" | "success";
+
 interface Row {
-	key: string; i: number; email: string; plan?: string; win: Array<{ n: string; pct: number; reset?: number; clr: string }>; err?: string; active: boolean;
+	key: string; i: number; email: string; plan?: string; win: Array<{ n: string; pct: number; reset?: number; clr: UsageColor }>; err?: string; active: boolean;
 }
 
-async function getAccessToken(as: any, key: string): Promise<string | undefined> {
+async function getAccessToken(as: AuthStorage, key: string): Promise<string | undefined> {
 	const cred = as.get(key);
 	if (!cred || cred.type !== "oauth") return undefined;
 	if (Date.now() < cred.expires) return cred.access;
@@ -66,17 +100,17 @@ async function getAccessToken(as: any, key: string): Promise<string | undefined>
 	return fresh.access;
 }
 
-class List {
+class List implements Component {
 	private rs: Row[] = [];
 	private loading = true;
 	private sel = 0;
-	private tu: { requestRender: () => void };
-	private th: any;
+	private tu: TUI;
+	private th: Theme;
 	private done: () => void;
-	private ctx: any;
+	private ctx: ExtensionCommandContext;
 	private busy = "";
 
-	constructor(tu: any, th: any, done: () => void, ctx: any) {
+	constructor(tu: TUI, th: Theme, _kb: KeybindingsManager, done: () => void, ctx: ExtensionCommandContext) {
 		this.tu = tu; this.th = th; this.done = done; this.ctx = ctx; void this.init();
 	}
 
@@ -100,7 +134,7 @@ class List {
 
 			const [u, p] = await Promise.all([fetchUsage(ak), fetchProfile(ak)]);
 			const wins: Row["win"] = [];
-			if (u?.w) for (const [wn, wd] of Object.entries(u.w).sort((a, b) => ({ week: 0, "5h": 1, sonnet: 2, opus: 3 } as any)[a[0]] - ({ week: 0, "5h": 1, sonnet: 2, opus: 3 } as any)[b[0]])) {
+			if (u?.w) for (const [wn, wd] of Object.entries(u.w).sort((a, b) => (USAGE_SORT[a[0]] ?? 99) - (USAGE_SORT[b[0]] ?? 99))) {
 				const rem = 100 - wd.pct;
 				wins.push({ n: wn, pct: wd.pct, reset: wd.reset, clr: rem <= 10 ? "error" : rem <= 30 ? "warning" : "success" });
 			}
@@ -125,16 +159,17 @@ class List {
 
 	private async withBusy(label: string, fn: () => Promise<void>) {
 		this.busy = label; this.tu.requestRender();
-		try { await fn(); } catch { this.busy = ""; this.tu.requestRender(); }
+		try { await fn(); } finally { this.busy = ""; this.tu.requestRender(); }
 	}
 
 	private async doSwitch() {
 		const r = this.rs[this.sel]; if (!r) return;
+		if (r.active) return;
 		const as = this.ctx.modelRegistry.authStorage;
 		const cred = as.get(r.key);
 		if (cred) as.set(ACT, cred);
 		this.done();
-		await this.ctx.reload();
+		try { await this.ctx.reload(); } catch (e) { this.ctx.ui.notify(`Reload failed: ${e instanceof Error ? e.message : String(e)}`, "error"); }
 	}
 
 	private async doAdd() {
@@ -164,8 +199,8 @@ class List {
 			as.set(ACT, { type: "oauth", ...creds });
 
 			this.ctx.ui.notify(`Added & switched to [${idx}]`, "success");
-		} catch (e: any) { this.ctx.ui.notify(`Failed: ${e?.message || e}`, "error"); }
-		this.busy = ""; this.loading = true; void this.init().then(() => { this.tu.requestRender(); });
+		} catch (e) { this.ctx.ui.notify(`Failed: ${e instanceof Error ? e.message : String(e)}`, "error"); }
+		this.loading = true; void this.init().then(() => { this.tu.requestRender(); });
 	}
 
 	private async doRemove() {
@@ -173,7 +208,7 @@ class List {
 		const as = this.ctx.modelRegistry.authStorage;
 		if (r.active) as.remove(ACT);
 		as.remove(r.key);
-		this.busy = ""; this.loading = true; void this.init().then(() => { this.sel = Math.min(this.sel, this.rs.length - 1); this.tu.requestRender(); });
+		this.loading = true; void this.init().then(() => { this.sel = Math.max(0, Math.min(this.sel, this.rs.length - 1)); this.tu.requestRender(); });
 	}
 
 	invalidate(): void {}
@@ -222,7 +257,7 @@ function fmt(d: Date): string {
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		const as = ctx.modelRegistry.authStorage;
-		for (const k of as.list?.() ?? []) {
+		for (const k of as.list()) {
 			if (k.startsWith(PF) || k === ACT) {
 				try { await getAccessToken(as, k); } catch {}
 			}
@@ -232,7 +267,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("multi-claude", {
 		description: "Manage multiple Anthropic Claude accounts",
 		handler: async (_args, ctx) => {
-			await ctx.ui.custom((tu: any, th: any, _kb: any, done: () => void) => new List(tu, th, done, ctx));
+			await ctx.ui.custom((tu, th, kb, done) => new List(tu, th, kb, done, ctx));
 		},
 	});
 }
