@@ -7,10 +7,6 @@
     "type": "git",
     "url": "git+https://github.com/ravshansbox/pi-multi-claude.git"
   },
-  "keywords": [
-    "pi",
-    "extension"
-  ],
   "files": [
     "index.ts",
     "README.md",
@@ -28,9 +24,23 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
+    "@types/node": "^26.1.2",
     "typescript": "^6.0.3"
   },
+  "homepage": "https://github.com/ravshansbox/pi-multi-claude#readme",
+  "bugs": {
+    "url": "https://github.com/ravshansbox/pi-multi-claude/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "provider"
+  ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck"
   }
 }
