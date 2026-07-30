@@ -1,31 +1,12 @@
 {
   "name": "@ravshansbox/pi-multi-claude",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Multi-account provider extension for pi with Anthropic Claude smart routing",
   "license": "MIT",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ravshansbox/pi-multi-claude.git"
-  },
-  "files": [
-    "index.ts",
-    "README.md",
-    "LICENSE"
-  ],
-  "type": "module",
-  "pi": {
-    "extensions": [
-      "./index.ts"
-    ]
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
-  },
-  "devDependencies": {
-    "@types/node": "^26.1.2",
-    "typescript": "^6.0.3"
   },
   "homepage": "https://github.com/ravshansbox/pi-multi-claude#readme",
   "bugs": {
@@ -39,6 +20,25 @@
     "pi-extension",
     "provider"
   ],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^6.0.3"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck"

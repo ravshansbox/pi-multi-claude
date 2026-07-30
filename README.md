@@ -12,7 +12,7 @@ Multi-account Anthropic Claude routing extension for pi.
 
 ## Usage
 
-Pi loads the extension from `./index.ts`. Run `/multi-claude` in the TUI to view saved Claude accounts, add a new account, switch the active account, or remove one.
+Pi loads the extension from `./src/index.ts`. Run `/multi-claude` in the TUI to view saved Claude accounts, add a new account, switch the active account, or remove one.
 
 For example, after adding two Claude accounts, open `/multi-claude`, move to the second account with `↑` or `↓`, and press `Enter` to switch pi to that account before continuing the session.
 
