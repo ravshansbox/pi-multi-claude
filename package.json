@@ -3,16 +3,28 @@
   "version": "1.0.0",
   "description": "Multi-account provider extension for pi with Anthropic Claude smart routing",
   "license": "MIT",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ravshansbox/pi-multi-claude.git"
   },
+  "homepage": "https://github.com/ravshansbox/pi-multi-claude#readme",
+  "bugs": {
+    "url": "https://github.com/ravshansbox/pi-multi-claude/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "provider"
+  ],
   "files": [
     "index.ts",
     "README.md",
     "LICENSE"
   ],
-  "type": "module",
   "pi": {
     "extensions": [
       "./index.ts"
@@ -27,18 +39,6 @@
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3"
   },
-  "homepage": "https://github.com/ravshansbox/pi-multi-claude#readme",
-  "bugs": {
-    "url": "https://github.com/ravshansbox/pi-multi-claude/issues"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "keywords": [
-    "pi-package",
-    "pi-extension",
-    "provider"
-  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck"
