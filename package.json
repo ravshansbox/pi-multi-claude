@@ -37,10 +37,14 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@types/proper-lockfile": "^4.1.4",
     "typescript": "^6.0.3"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck"
+  },
+  "dependencies": {
+    "proper-lockfile": "^4.1.2"
   }
 }

@@ -1,14 +1,12 @@
-import {
-  loginAnthropic,
-  refreshAnthropicToken,
-} from '@earendil-works/pi-ai/oauth';
+import type { OAuthAuth, OAuthCredential } from '@earendil-works/pi-ai';
+import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
-  AuthStorage,
   Theme,
-  OAuthCredential,
 } from '@earendil-works/pi-coding-agent';
+import { AccountStore } from './auth-store.ts';
+import { createInteraction } from './oauth-interaction.ts';
 import {
   matchesKey,
   type TUI,
@@ -135,14 +133,20 @@ function makeAccountKey(index: number): string {
   return `${ACCOUNT_PREFIX}${index}`;
 }
 
-function getAccountKeys(authStorage: AuthStorage): string[] {
+function anthropicOAuth(): OAuthAuth {
+  const oauth = anthropicProvider().auth.oauth;
+  if (!oauth) throw new Error('Anthropic provider exposes no OAuth flow');
+  return oauth;
+}
+
+function getAccountKeys(authStorage: AccountStore): string[] {
   return authStorage
     .list()
-    .filter((key) => key.startsWith(ACCOUNT_PREFIX))
+    .filter((key: string) => key.startsWith(ACCOUNT_PREFIX))
     .sort();
 }
 
-function getActiveAccountKey(authStorage: AuthStorage): string | undefined {
+function getActiveAccountKey(authStorage: AccountStore): string | undefined {
   const activeCredential = authStorage.get(ACTIVE_KEY);
   if (!activeCredential) return undefined;
 
@@ -180,7 +184,7 @@ interface AccountRow {
 }
 
 async function getAccessToken(
-  authStorage: AuthStorage,
+  authStorage: AccountStore,
   key: string,
 ): Promise<string | undefined> {
   const credential = authStorage.get(key);
@@ -191,15 +195,15 @@ async function getAccessToken(
   // numbered account copies, then copy one into ACTIVE_KEY if needed.
   if (key === ACTIVE_KEY) return credential.access;
 
-  const freshCredentials = await refreshAnthropicToken(
-    credential.refresh,
-  ).catch((error: unknown) => {
-    debug('refreshAnthropicToken error', key, error);
-    return undefined;
-  });
+  const freshCredentials = await anthropicOAuth()
+    .refresh(credential, AbortSignal.timeout(FETCH_TIMEOUT_MS))
+    .catch((error: unknown) => {
+      debug('anthropic oauth refresh error', key, error);
+      return undefined;
+    });
   if (!freshCredentials) return undefined;
 
-  authStorage.set(key, { type: 'oauth', ...freshCredentials });
+  authStorage.set(key, freshCredentials);
   return freshCredentials.access;
 }
 
@@ -240,7 +244,7 @@ class AccountList implements Component {
   }
 
   private async init() {
-    const authStorage = this.context.modelRegistry.authStorage;
+    const authStorage = new AccountStore();
     const accountKeys = getAccountKeys(authStorage);
     const activeKey = getActiveAccountKey(authStorage);
     const rows: AccountRow[] = [];
@@ -367,7 +371,7 @@ class AccountList implements Component {
     const row = this.rows[this.selectedIndex];
     if (!row || row.active) return;
 
-    const authStorage = this.context.modelRegistry.authStorage;
+    const authStorage = new AccountStore();
     await getAccessToken(authStorage, row.key);
     const credential = authStorage.get(row.key);
     if (credential) {
@@ -388,33 +392,16 @@ class AccountList implements Component {
 
   private async addAccount() {
     try {
-      const credentials = await loginAnthropic({
-        onAuth: ({ url, instructions }) => {
-          this.context.ui.notify(`Open: ${url}`, 'info');
-          if (instructions) this.context.ui.notify(instructions, 'info');
-
-          void import('node:child_process').then(({ exec }) => {
-            let openCmd: string;
-            if (process.platform === 'darwin') {
-              openCmd = `open '${url}'`;
-            } else if (process.platform === 'win32') {
-              openCmd = `start "" "${url}"`;
-            } else {
-              openCmd = `xdg-open '${url}'`;
-            }
-            exec(openCmd);
-          });
+      const interaction = createInteraction(
+        {
+          notify: (message, level) => this.context.ui.notify(message, level),
+          input: (message) => this.context.ui.input(message),
         },
-        onProgress: (message: string) =>
-          this.context.ui.notify(message, 'info'),
-        onPrompt: async ({ message }: { message: string }) => {
-          const code = await this.context.ui.input(message);
-          if (!code?.trim()) throw new Error('Cancelled');
-          return code.trim();
-        },
-      });
+        new AbortController().signal,
+      );
+      const credentials = await anthropicOAuth().login(interaction);
 
-      const authStorage = this.context.modelRegistry.authStorage;
+      const authStorage = new AccountStore();
 
       let nextIndex = 0;
       for (const key of authStorage.list()) {
@@ -426,11 +413,8 @@ class AccountList implements Component {
         }
       }
 
-      authStorage.set(makeAccountKey(nextIndex), {
-        type: 'oauth',
-        ...credentials,
-      });
-      authStorage.set(ACTIVE_KEY, { type: 'oauth', ...credentials });
+      authStorage.set(makeAccountKey(nextIndex), credentials);
+      authStorage.set(ACTIVE_KEY, credentials);
 
       this.context.ui.notify('Added & switched account', 'info');
     } catch (error) {
@@ -450,7 +434,7 @@ class AccountList implements Component {
     const row = this.rows[this.selectedIndex];
     if (!row) return;
 
-    const authStorage = this.context.modelRegistry.authStorage;
+    const authStorage = new AccountStore();
     if (row.active) {
       authStorage.remove(ACTIVE_KEY);
     }
@@ -585,8 +569,8 @@ function formatCountdown(date: Date): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.on('session_start', async (_event, context) => {
-    const authStorage = context.modelRegistry.authStorage;
+  pi.on('session_start', async () => {
+    const authStorage = new AccountStore();
     const activeAccountKey = getActiveAccountKey(authStorage);
 
     for (const key of getAccountKeys(authStorage)) {
