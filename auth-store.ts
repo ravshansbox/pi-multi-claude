@@ -47,6 +47,7 @@ export class AccountStore {
     } catch (error) {
       throw new Error(
         `Failed to read auth.json: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

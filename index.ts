@@ -5,6 +5,7 @@ import { AccountStore } from './auth-store.ts';
 import { createInteraction } from './oauth-interaction.ts';
 import {
   matchesKey,
+  visibleWidth,
   type TUI,
   type KeybindingsManager,
   type Component,
@@ -426,8 +427,7 @@ class AccountList implements Component {
     const horizontalLine = '─'.repeat(width - 2);
 
     const boxLine = (content: string): string => {
-      const visible = content.replace(/\x1b\[[0-9;]*m/g, '');
-      const padding = ' '.repeat(Math.max(0, innerWidth - visible.length));
+      const padding = ' '.repeat(Math.max(0, innerWidth - visibleWidth(content)));
       return this.dim('│ ') + content + padding + this.dim(' │');
     };
 
