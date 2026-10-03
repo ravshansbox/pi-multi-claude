@@ -4,10 +4,8 @@ Multi-account Anthropic Claude routing extension for pi.
 
 ## Install
 
-```json
-{
-  "extensions": ["github:ravshansbox/pi-multi-claude"]
-}
+```bash
+pi install git:github.com/ravshansbox/pi-multi-claude
 ```
 
 ## Usage
