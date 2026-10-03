@@ -18,5 +18,5 @@ For example, after adding two Claude accounts, open `/multi-claude`, move to the
 
 ```bash
 npm install
-npm run typecheck
+npm run check
 ```
