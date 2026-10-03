@@ -1,8 +1,8 @@
 import type { OAuthAuth, OAuthCredential } from '@earendil-works/pi-ai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from '@earendil-works/pi-coding-agent';
-import { AccountStore } from './auth-store.ts';
-import { createInteraction } from './oauth-interaction.ts';
+import { AccountStore } from './src/auth-store.ts';
+import { createInteraction } from './src/oauth-interaction.ts';
 import {
   matchesKey,
   visibleWidth,

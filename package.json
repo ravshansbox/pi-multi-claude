@@ -22,8 +22,7 @@
   ],
   "files": [
     "index.ts",
-    "auth-store.ts",
-    "oauth-interaction.ts",
+    "src",
     "README.md",
     "LICENSE"
   ],
