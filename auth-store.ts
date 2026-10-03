@@ -1,12 +1,6 @@
 import type { Credential } from '@earendil-works/pi-ai';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import lockfile from 'proper-lockfile';
 
@@ -67,11 +61,7 @@ export class AccountStore {
     try {
       const data = this.readAll();
       fn(data);
-      writeFileSync(
-        this.authPath,
-        `${JSON.stringify(data, null, 2)}\n`,
-        WRITE_OPTIONS,
-      );
+      writeFileSync(this.authPath, `${JSON.stringify(data, null, 2)}\n`, WRITE_OPTIONS);
       chmodSync(this.authPath, 0o600);
     } finally {
       release();

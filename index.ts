@@ -1,10 +1,6 @@
 import type { OAuthAuth, OAuthCredential } from '@earendil-works/pi-ai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-  Theme,
-} from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from '@earendil-works/pi-coding-agent';
 import { AccountStore } from './auth-store.ts';
 import { createInteraction } from './oauth-interaction.ts';
 import {
@@ -66,26 +62,19 @@ async function fetchUsage(accessToken: string) {
     }
 
     const data: AnthropicUsageResponse = await response.json();
-    const windows: Record<
-      string,
-      { percent: number; reset?: number | undefined }
-    > = {};
+    const windows: Record<string, { percent: number; reset?: number | undefined }> = {};
 
     if (data.five_hour?.utilization !== undefined) {
       windows['5h'] = {
         percent: data.five_hour.utilization,
-        reset: data.five_hour.resets_at
-          ? Date.parse(data.five_hour.resets_at)
-          : undefined,
+        reset: data.five_hour.resets_at ? Date.parse(data.five_hour.resets_at) : undefined,
       };
     }
 
     if (data.seven_day?.utilization !== undefined) {
       windows['week'] = {
         percent: data.seven_day.utilization,
-        reset: data.seven_day.resets_at
-          ? Date.parse(data.seven_day.resets_at)
-          : undefined,
+        reset: data.seven_day.resets_at ? Date.parse(data.seven_day.resets_at) : undefined,
       };
     }
 
@@ -116,10 +105,7 @@ async function fetchProfile(accessToken: string) {
     } else if (account?.has_claude_pro) {
       plan = 'pro';
     } else if (organization?.rate_limit_tier === 'default_raven') {
-      plan =
-        organization?.seat_tier === 'team_premium'
-          ? 'team premium'
-          : 'team standard';
+      plan = organization?.seat_tier === 'team_premium' ? 'team premium' : 'team standard';
     }
 
     return { email: account?.email, plan };
@@ -155,8 +141,7 @@ function getActiveAccountKey(authStorage: AccountStore): string | undefined {
     if (
       credential &&
       credential.type === 'oauth' &&
-      (credential as OAuthCredential).access ===
-        (activeCredential as OAuthCredential).access
+      (credential as OAuthCredential).access === (activeCredential as OAuthCredential).access
     ) {
       return accountKey;
     }
@@ -183,10 +168,7 @@ interface AccountRow {
   active: boolean;
 }
 
-async function getAccessToken(
-  authStorage: AccountStore,
-  key: string,
-): Promise<string | undefined> {
+async function getAccessToken(authStorage: AccountStore, key: string): Promise<string | undefined> {
   const credential = authStorage.get(key);
   if (!credential || credential.type !== 'oauth') return undefined;
   if (Date.now() < credential.expires) return credential.access;
@@ -250,10 +232,7 @@ class AccountList implements Component {
     const rows: AccountRow[] = [];
 
     for (const accountKey of accountKeys) {
-      const accountIndex = parseInt(
-        accountKey.slice(ACCOUNT_PREFIX.length),
-        10,
-      );
+      const accountIndex = parseInt(accountKey.slice(ACCOUNT_PREFIX.length), 10);
       const credential = authStorage.get(accountKey);
       if (!credential) continue;
 
@@ -278,8 +257,7 @@ class AccountList implements Component {
       const usageWindows: UsageWindowRow[] = [];
       if (usage?.windows) {
         const entries = Object.entries(usage.windows).sort(
-          (a, b) =>
-            (USAGE_SORT_ORDER[a[0]] ?? 99) - (USAGE_SORT_ORDER[b[0]] ?? 99),
+          (a, b) => (USAGE_SORT_ORDER[a[0]] ?? 99) - (USAGE_SORT_ORDER[b[0]] ?? 99),
         );
         for (const [windowName, windowData] of entries) {
           const remaining = 100 - windowData.percent;
@@ -287,12 +265,7 @@ class AccountList implements Component {
             name: windowName,
             percent: windowData.percent,
             reset: windowData.reset,
-            color:
-              remaining <= 10
-                ? 'error'
-                : remaining <= 30
-                  ? 'warning'
-                  : 'success',
+            color: remaining <= 10 ? 'error' : remaining <= 30 ? 'warning' : 'success',
           });
         }
       }
@@ -333,10 +306,7 @@ class AccountList implements Component {
     }
 
     if (matchesKey(event, 'down') || event === 'j') {
-      this.selectedIndex = Math.min(
-        this.rows.length - 1,
-        this.selectedIndex + 1,
-      );
+      this.selectedIndex = Math.min(this.rows.length - 1, this.selectedIndex + 1);
       this.tui.requestRender();
       return;
     }
@@ -442,10 +412,7 @@ class AccountList implements Component {
 
     this.loading = true;
     void this.init().then(() => {
-      this.selectedIndex = Math.max(
-        0,
-        Math.min(this.selectedIndex, this.rows.length - 1),
-      );
+      this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, this.rows.length - 1));
       this.tui.requestRender();
     });
   }
@@ -486,11 +453,7 @@ class AccountList implements Component {
     if (this.loading) {
       lines.push(boxLine('loading...'));
     } else if (!this.rows.length) {
-      lines.push(
-        boxLine('no accounts'),
-        boxLine(''),
-        boxLine(this.dim('a  add account')),
-      );
+      lines.push(boxLine('no accounts'), boxLine(''), boxLine(this.dim('a  add account')));
     } else {
       for (const [index, row] of this.rows.entries()) {
         const isSelected = index === this.selectedIndex;
@@ -498,9 +461,7 @@ class AccountList implements Component {
         const planLabel = row.plan ? theme.fg('accent', ` ${row.plan}`) : '';
         const cursor = isSelected ? theme.fg('accent', '▸ ') : '  ';
         const activeDot = row.active ? theme.fg('success', ' ●') : '';
-        lines.push(
-          boxLine(`${cursor}${this.bold(row.email)}${planLabel}${activeDot}`),
-        );
+        lines.push(boxLine(`${cursor}${this.bold(row.email)}${planLabel}${activeDot}`));
 
         if (row.error) {
           lines.push(boxLine(this.dim(`   ${row.error}`)));
@@ -510,9 +471,7 @@ class AccountList implements Component {
         for (const usageWindow of row.usageWindows) {
           const filled = Math.min(10, Math.round(usageWindow.percent / 10));
           const empty = 10 - filled;
-          const bar =
-            theme.fg(usageWindow.color, '█'.repeat(filled)) +
-            this.dim('░'.repeat(empty));
+          const bar = theme.fg(usageWindow.color, '█'.repeat(filled)) + this.dim('░'.repeat(empty));
           const resetLabel = usageWindow.reset
             ? this.dim(` ${formatCountdown(new Date(usageWindow.reset))}`)
             : '';
@@ -538,15 +497,11 @@ class AccountList implements Component {
 
 function getWeeklyReset(row: AccountRow): number {
   return (
-    row.usageWindows.find((window) => window.name === 'week')?.reset ??
-    Number.POSITIVE_INFINITY
+    row.usageWindows.find((window) => window.name === 'week')?.reset ?? Number.POSITIVE_INFINITY
   );
 }
 
-function compareRowsByWeeklyReset(
-  first: AccountRow,
-  second: AccountRow,
-): number {
+function compareRowsByWeeklyReset(first: AccountRow, second: AccountRow): number {
   const resetDiff = getWeeklyReset(first) - getWeeklyReset(second);
   if (resetDiff !== 0) return resetDiff;
   return first.email.localeCompare(second.email);
@@ -590,8 +545,7 @@ export default function (pi: ExtensionAPI) {
     description: 'Manage multiple Anthropic Claude accounts',
     handler: async (_args, context) => {
       await context.ui.custom(
-        (tui, theme, keybindings, done) =>
-          new AccountList(tui, theme, keybindings, done, context),
+        (tui, theme, keybindings, done) => new AccountList(tui, theme, keybindings, done, context),
       );
     },
   });

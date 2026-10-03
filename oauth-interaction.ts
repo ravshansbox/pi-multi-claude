@@ -1,8 +1,4 @@
-import type {
-  AuthEvent,
-  AuthPrompt,
-  ProviderAuthInteraction,
-} from '@earendil-works/pi-ai';
+import type { AuthEvent, AuthPrompt, ProviderAuthInteraction } from '@earendil-works/pi-ai';
 
 export interface InteractionHost {
   notify(message: string, level: 'info' | 'error'): void;
@@ -37,10 +33,7 @@ export function createInteraction(
           openInBrowser(event.url);
           return;
         case 'device_code':
-          host.notify(
-            `Enter code ${event.userCode} at ${event.verificationUri}`,
-            'info',
-          );
+          host.notify(`Enter code ${event.userCode} at ${event.verificationUri}`, 'info');
           openInBrowser(event.verificationUri);
           return;
         case 'info':
