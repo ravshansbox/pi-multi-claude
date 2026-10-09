@@ -5,7 +5,7 @@ Multi-account Anthropic Claude routing extension for pi.
 ## Install
 
 ```bash
-pi install git:github.com/ravshansbox/pi-multi-claude
+pi install npm:@ravshansbox/pi-multi-claude
 ```
 
 ## Usage
