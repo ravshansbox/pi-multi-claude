@@ -14,6 +14,10 @@ Pi loads the extension from `./index.ts`. Run `/multi-claude` in the TUI to view
 
 For example, after adding two Claude accounts, open `/multi-claude`, move to the second account with `↑` or `↓`, and press `Enter` to switch pi to that account before continuing the session.
 
+## Configuration
+
+Set `MULTI_CLAUDE_DEBUG=1` to print debug logs to stderr.
+
 ## Development
 
 ```bash
