@@ -174,8 +174,6 @@ async function getAccessToken(authStorage: AccountStore, key: string): Promise<s
   if (!credential || credential.type !== 'oauth') return undefined;
   if (Date.now() < credential.expires) return credential.access;
 
-  // Never refresh the provider's current/active key directly. Refresh only the
-  // numbered account copies, then copy one into ACTIVE_KEY if needed.
   if (key === ACTIVE_KEY) return credential.access;
 
   const freshCredentials = await anthropicOAuth()
