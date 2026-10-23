@@ -8,6 +8,8 @@ Multi-account Anthropic Claude routing extension for pi.
 pi install npm:@ravshansbox/pi-multi-claude
 ```
 
+Add `-l` to install it in project settings.
+
 ## Usage
 
 Pi loads the extension from `./index.ts`. Run `/multi-claude` in the TUI to view saved Claude accounts, add a new account, switch the active account, or remove one.
