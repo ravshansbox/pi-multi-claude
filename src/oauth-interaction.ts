@@ -2,7 +2,7 @@ import type { AuthEvent, AuthPrompt, ProviderAuthInteraction } from '@earendil-w
 
 export interface InteractionHost {
   notify(message: string, level: 'info' | 'error'): void;
-  input(message: string): Promise<string | undefined>;
+  input(message: string, signal?: AbortSignal): Promise<string | undefined>;
 }
 
 function openInBrowser(url: string): void {
@@ -50,7 +50,7 @@ export function createInteraction(
         if (!first) throw new Error('No options offered');
         return first.id;
       }
-      const answer = await host.input(prompt.message);
+      const answer = await host.input(prompt.message, prompt.signal);
       if (!answer?.trim()) throw new Error('Cancelled');
       return answer.trim();
     },

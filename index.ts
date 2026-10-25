@@ -364,7 +364,8 @@ class AccountList implements Component {
       const interaction = createInteraction(
         {
           notify: (message, level) => this.context.ui.notify(message, level),
-          input: (message) => this.context.ui.input(message),
+          input: (message, signal) =>
+            this.context.ui.input(message, undefined, signal ? { signal } : undefined),
         },
         new AbortController().signal,
       );
