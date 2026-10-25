@@ -309,7 +309,7 @@ class AccountList implements Component {
     }
 
     if (matchesKey(event, 'down') || event === 'j') {
-      this.selectedIndex = Math.min(this.rows.length - 1, this.selectedIndex + 1);
+      this.selectedIndex = Math.max(0, Math.min(this.rows.length - 1, this.selectedIndex + 1));
       this.tui.requestRender();
       return;
     }

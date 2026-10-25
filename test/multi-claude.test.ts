@@ -38,7 +38,7 @@ function mockFetch() {
   }) as typeof fetch;
 }
 
-async function openList(handler: Handler): Promise<Component> {
+async function openList(handler: Handler, earlyInput?: string): Promise<Component> {
   let component: Component | undefined;
   const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
   const tui = { requestRender: () => {} };
@@ -46,6 +46,7 @@ async function openList(handler: Handler): Promise<Component> {
     ui: {
       custom: (factory: (...args: unknown[]) => Component) => {
         component = factory(tui, theme, {}, () => {});
+        if (earlyInput) component.handleInput?.(earlyInput);
         return new Promise(() => {});
       },
       notify: () => {},
@@ -67,4 +68,19 @@ test('keeps the active credential in sync when the list refreshes the active acc
   const auth = JSON.parse(readFileSync(authPath, 'utf-8'));
   assert.equal(auth['anthropic-0'].access, 'new-access');
   assert.equal(auth.anthropic.access, 'new-access');
+});
+
+test('keeps a row selected when a key is pressed while loading', async () => {
+  const valid = {
+    type: 'oauth',
+    access: 'access',
+    refresh: 'refresh',
+    expires: Date.now() + 3_600_000,
+  };
+  const { handler } = setup({ 'anthropic-0': valid });
+  mockFetch();
+
+  const component = await openList(handler, 'j');
+
+  assert.match(component.render(80).join('\n'), /▸/);
 });
