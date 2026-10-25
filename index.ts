@@ -185,6 +185,10 @@ async function getAccessToken(authStorage: AccountStore, key: string): Promise<s
   if (!freshCredentials) return undefined;
 
   authStorage.set(key, freshCredentials);
+  const activeCredential = authStorage.get(ACTIVE_KEY);
+  if (activeCredential?.type === 'oauth' && activeCredential.access === credential.access) {
+    authStorage.set(ACTIVE_KEY, freshCredentials);
+  }
   return freshCredentials.access;
 }
 
