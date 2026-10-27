@@ -547,6 +547,10 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand('multi-claude', {
     description: 'Manage multiple Anthropic Claude accounts',
     handler: async (_args, context) => {
+      if (context.mode !== 'tui') {
+        context.ui.notify('/multi-claude requires interactive mode', 'error');
+        return;
+      }
       await context.ui.custom(
         (tui, theme, keybindings, done) => new AccountList(tui, theme, keybindings, done, context),
       );

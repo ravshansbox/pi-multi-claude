@@ -43,6 +43,7 @@ async function openList(handler: Handler, earlyInput?: string): Promise<Componen
   const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
   const tui = { requestRender: () => {} };
   void handler('', {
+    mode: 'tui',
     ui: {
       custom: (factory: (...args: unknown[]) => Component) => {
         component = factory(tui, theme, {}, () => {});
@@ -57,6 +58,24 @@ async function openList(handler: Handler, earlyInput?: string): Promise<Componen
   }
   return component!;
 }
+
+test('asks for the TUI in RPC mode instead of opening the list', async () => {
+  const { handler } = setup({});
+  const notifications: string[] = [];
+  let opened = false;
+  await handler('', {
+    mode: 'rpc',
+    hasUI: true,
+    ui: {
+      custom: async () => {
+        opened = true;
+      },
+      notify: (message: string) => notifications.push(message),
+    },
+  });
+  assert.equal(opened, false);
+  assert.deepEqual(notifications, ['/multi-claude requires interactive mode']);
+});
 
 test('keeps the active credential in sync when the list refreshes the active account', async () => {
   const expired = { type: 'oauth', access: 'old-access', refresh: 'old-refresh', expires: 0 };
